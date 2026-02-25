@@ -27,18 +27,18 @@ const localizer = dateFnsLocalizer({
 
 // map day codes to weekday numbers (0 = Sun, 1 = Mon, ...)
 const DAY_MAP = {
-  M: 1, // Monday
-  T: 2, // Tuesday
-  W: 3, // Wednesday
-  R: 4, // Thursday (R is common shorthand)
-  F: 5, // Friday
+  M: 1,
+  T: 2,
+  W: 3,
+  R: 4,
+  F: 5,
 }
 
 // helper: get Monday of the current week
 function getWeekStart(date = new Date()) {
   const d = new Date(date)
-  const day = d.getDay() // 0 (Sun) .. 6 (Sat)
-  const diff = (day + 6) % 7 // days since Monday
+  const day = d.getDay()
+  const diff = (day + 6) % 7
   d.setDate(d.getDate() - diff)
   d.setHours(0, 0, 0, 0)
   return d
@@ -58,18 +58,15 @@ function rowsToEvents(rows) {
   const events = []
 
   rows.forEach((row) => {
-    // day_code is like "MWF" or "TR"
     const codes = row.day_code ? row.day_code.split('') : ['M']
 
     codes.forEach((code) => {
       const weekday = DAY_MAP[code]
       if (weekday == null) return
 
-      // clone Monday and move to correct weekday
       const baseDate = new Date(monday)
       baseDate.setDate(monday.getDate() + (weekday - 1))
 
-      // Supabase returns time as "HH:MM:SS"
       const [sh, sm, ss] = row.start_time.split(':').map(Number)
       const [eh, em, es] = row.end_time.split(':').map(Number)
 
@@ -80,14 +77,14 @@ function rowsToEvents(rows) {
       end.setHours(eh, em, es || 0, 0)
 
       events.push({
-        id: `${row.section_id}-${code}`, // unique per section+day
+        id: `${row.section_id}-${code}`,
         sectionId: row.section_id,
         patternSlotId: row.pattern_slot_id,
         timeSlotId: row.time_slot_id,
-        title: row.course_code,                  // e.g. CS101
-        professor: row.instructor_name,          // e.g. Alice Smith
-        room: row.room_name,                     // e.g. Room 101
-        gradeLevel: String(row.grade_level),     // "1", "2", ...
+        title: row.course_code,
+        professor: row.instructor_name,
+        room: row.room_name,
+        gradeLevel: String(row.grade_level),
         start,
         end,
       })
@@ -105,16 +102,14 @@ function timesOverlap(startA, endA, startB, endB) {
 export default function ScheduleCalendar() {
   const [events, setEvents] = useState([])
 
-  // calendar view state
   const [view, setView] = useState('week')
   const [currentDate, setCurrentDate] = useState(new Date())
 
-  // FILTER STATE
-  const [professorFilter, setProfessorFilter] = useState('all')
-  const [roomFilter, setRoomFilter] = useState('all')
-  const [gradeFilter, setGradeFilter] = useState('all')
+  // FILTER STATE (arrays of selected values; empty array = show all)
+  const [professorFilter, setProfessorFilter] = useState([])
+  const [roomFilter, setRoomFilter] = useState([])
+  const [gradeFilter, setGradeFilter] = useState([])
 
-  // load events from Supabase on first render
   useEffect(() => {
     const fetchEvents = async () => {
       const { data, error } = await supabase
@@ -133,22 +128,42 @@ export default function ScheduleCalendar() {
     fetchEvents()
   }, [])
 
-  // unique values for dropdowns
-  const professors = Array.from(new Set(events.map((e) => e.professor)))
-  const rooms = Array.from(new Set(events.map((e) => e.room)))
-  const grades = Array.from(new Set(events.map((e) => e.gradeLevel)))
+  const professors = Array.from(new Set(events.map((e) => e.professor))).sort()
+  const rooms = Array.from(new Set(events.map((e) => e.room))).sort()
+  const grades = Array.from(new Set(events.map((e) => e.gradeLevel))).sort()
 
-  // apply ALL filters before passing events to calendar
+  const toggleFilterValue = (value, currentArray, setFn) => {
+    if (value === '__ALL__') {
+      setFn([])
+      return
+    }
+
+    setFn((prev) => {
+      if (prev.length === 0) {
+        return [value]
+      }
+      if (prev.includes(value)) {
+        const next = prev.filter((v) => v !== value)
+        return next
+      }
+      return [...prev, value]
+    })
+  }
+
   const filteredEvents = events.filter((e) => {
-    if (professorFilter !== 'all' && e.professor !== professorFilter) return false
-    if (roomFilter !== 'all' && e.room !== roomFilter) return false
-    if (gradeFilter !== 'all' && e.gradeLevel !== gradeFilter) return false
+    if (professorFilter.length > 0 && !professorFilter.includes(e.professor)) {
+      return false
+    }
+    if (roomFilter.length > 0 && !roomFilter.includes(e.room)) {
+      return false
+    }
+    if (gradeFilter.length > 0 && !gradeFilter.includes(e.gradeLevel)) {
+      return false
+    }
     return true
   })
 
-  // drag-and-drop handler with conflict checking + DB update
   const handleEventDrop = async ({ event, start, end, isAllDay }) => {
-    // For now, don't allow changing the day of week – only the time
     const originalDay = event.start.getDay()
     const newDay = start.getDay()
     if (originalDay !== newDay) {
@@ -160,9 +175,8 @@ export default function ScheduleCalendar() {
 
     const conflicts = []
 
-    // conflict checking against ALL events (not just filtered)
     events.forEach((other) => {
-      if (other.id === movedEvent.id) return // skip itself
+      if (other.id === movedEvent.id) return
 
       const overlap = timesOverlap(
         movedEvent.start,
@@ -173,21 +187,18 @@ export default function ScheduleCalendar() {
 
       if (!overlap) return
 
-      // same professor at overlapping time
       if (movedEvent.professor === other.professor) {
         conflicts.push(
           `Professor conflict: ${movedEvent.professor} also has "${other.title}" at this time.`
         )
       }
 
-      // same room at overlapping time
       if (movedEvent.room === other.room) {
         conflicts.push(
           `Room conflict: ${movedEvent.room} is already used by "${other.title}" at this time.`
         )
       }
 
-      // same grade level at overlapping time
       if (movedEvent.gradeLevel === other.gradeLevel) {
         conflicts.push(
           `Grade-level conflict: ${movedEvent.gradeLevel} already has "${other.title}" at this time.`
@@ -196,11 +207,15 @@ export default function ScheduleCalendar() {
     })
 
     if (conflicts.length > 0) {
-      alert(conflicts.join('\n'))
-      return
+      const message =
+        conflicts.join('\n') +
+        '\n\nClick "OK" to override and move the class anyway, or "Cancel" to keep the original time.'
+      const override = window.confirm(message)
+      if (!override) {
+        return
+      }
     }
 
-    // No conflicts -> update DB (time_slot) then update UI
     const newStartStr = toTimeString(start)
     const newEndStr = toTimeString(end)
 
@@ -214,11 +229,12 @@ export default function ScheduleCalendar() {
 
     if (error) {
       console.error('Error updating time in Supabase:', error)
-      alert('There was a problem saving this change. The calendar was not updated.')
+      alert(
+        'There was a problem saving this change in the database, so the calendar was not updated.'
+      )
       return
     }
 
-    // Get the new time-of-day from the dropped event
     const sh = start.getHours()
     const sm = start.getMinutes()
     const ss = start.getSeconds()
@@ -226,7 +242,6 @@ export default function ScheduleCalendar() {
     const em = end.getMinutes()
     const es = end.getSeconds()
 
-    // Update ALL events that share this timeSlotId (e.g. M/W/F sections)
     setEvents((prev) =>
       prev.map((e) => {
         if (e.timeSlotId !== event.timeSlotId) return e
@@ -243,62 +258,151 @@ export default function ScheduleCalendar() {
   }
 
   return (
-    <div style={{ height: '80vh', marginTop: '2rem', width: '100%' }}>
-      {/* Filter controls */}
+    <div style={{ height: '80vh', marginTop: '1rem', width: '100%' }}>
+      {/* Filter controls - dropdown style using <details> */}
       <div
         style={{
-          marginBottom: '1rem',
+          marginBottom: '0.75rem',
           display: 'flex',
-          gap: '1rem',
+          gap: '2rem',
           flexWrap: 'wrap',
         }}
       >
         {/* Professor filter */}
         <div>
-          <label style={{ marginRight: '0.5rem' }}>Professor:</label>
-          <select
-            value={professorFilter}
-            onChange={(e) => setProfessorFilter(e.target.value)}
-          >
-            <option value="all">All</option>
-            {professors.map((name) => (
-              <option key={name} value={name}>
-                {name}
-              </option>
-            ))}
-          </select>
+          <details>
+            <summary
+              style={{
+                fontWeight: 'bold',
+                cursor: 'pointer',
+                listStyle: 'none',
+              }}
+            >
+              Professor
+            </summary>
+            <div style={{ marginTop: '0.25rem' }}>
+              <div>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={professorFilter.length === 0}
+                    onChange={() =>
+                      toggleFilterValue(
+                        '__ALL__',
+                        professorFilter,
+                        setProfessorFilter
+                      )
+                    }
+                  />{' '}
+                  All
+                </label>
+              </div>
+              {professors.map((name) => (
+                <div key={name}>
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={professorFilter.includes(name)}
+                      onChange={() =>
+                        toggleFilterValue(
+                          name,
+                          professorFilter,
+                          setProfessorFilter
+                        )
+                      }
+                    />{' '}
+                    {name}
+                  </label>
+                </div>
+              ))}
+            </div>
+          </details>
         </div>
 
         {/* Room filter */}
         <div>
-          <label style={{ marginRight: '0.5rem' }}>Room:</label>
-          <select
-            value={roomFilter}
-            onChange={(e) => setRoomFilter(e.target.value)}
-          >
-            <option value="all">All</option>
-            {rooms.map((room) => (
-              <option key={room} value={room}>
-                {room}
-              </option>
-            ))}
-          </select>
+          <details>
+            <summary
+              style={{
+                fontWeight: 'bold',
+                cursor: 'pointer',
+                listStyle: 'none',
+              }}
+            >
+              Room
+            </summary>
+            <div style={{ marginTop: '0.25rem' }}>
+              <div>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={roomFilter.length === 0}
+                    onChange={() =>
+                      toggleFilterValue('__ALL__', roomFilter, setRoomFilter)
+                    }
+                  />{' '}
+                  All
+                </label>
+              </div>
+              {rooms.map((room) => (
+                <div key={room}>
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={roomFilter.includes(room)}
+                      onChange={() =>
+                        toggleFilterValue(room, roomFilter, setRoomFilter)
+                      }
+                    />{' '}
+                    {room}
+                  </label>
+                </div>
+              ))}
+            </div>
+          </details>
         </div>
 
         {/* Grade Level filter */}
         <div>
-          <label style={{ marginRight: '0.5rem' }}>Grade level:</label>
-          <select
-            value={gradeFilter}
-            onChange={(e) => setGradeFilter(e.target.value)}
-          >
-            <option value="all">All</option>
-            {grades.map((level) => (
-              <option key={level} value={level}>
-                {level}
-              </option>
-            ))}
-          </select>
+          <details>
+            <summary
+              style={{
+                fontWeight: 'bold',
+                cursor: 'pointer',
+                listStyle: 'none',
+              }}
+            >
+              Grade level
+            </summary>
+            <div style={{ marginTop: '0.25rem' }}>
+              <div>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={gradeFilter.length === 0}
+                    onChange={() =>
+                      toggleFilterValue('__ALL__', gradeFilter, setGradeFilter)
+                    }
+                  />{' '}
+                  All
+                </label>
+              </div>
+              {grades.map((level) => (
+                <div key={level}>
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={gradeFilter.includes(level)}
+                      onChange={() =>
+                        toggleFilterValue(level, gradeFilter, setGradeFilter)
+                      }
+                    />{' '}
+                    {level}
+                  </label>
+                </div>
+              ))}
+            </div>
+          </details>
         </div>
       </div>
 
